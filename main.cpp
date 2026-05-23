@@ -5,28 +5,27 @@
 #include <cstdint>
 #include <string>
 
-// --- [ GÖRSELLERDEN ALINAN VE DÖNGÜYE UYARLANAN OFSETLER ] ---
+// --- [ UNREAL ENGINE GÜNCEL OFSET YAPILANDIRMASI ] ---
 namespace Offsets {
-    constexpr uintptr_t MainBase1 = 0x0461CF28; // Hız ve Stamina Ana Adresi
-    constexpr uintptr_t MainBase2 = 0x04611F80; // FOV ve GWorld Ana Adresi
+    constexpr uintptr_t MainBase1 = 0x0461CF28;    // Hız ve Stamina Ana Adresi
+    constexpr uintptr_t MainBase2 = 0x04611F80;    // FOV ve GWorld Ana Adresi
     constexpr uintptr_t PositionBase = 0x041C9A00; // Kendimizi yükseltme adresi
 
-    // Sabit Zincirler
+    // Sabit Pointer Zincirleri
     const std::vector<unsigned int> SpeedChain    = { 0x0, 0xA0, 0x558, 0x18, 0x118 };
     const std::vector<unsigned int> StaminaChain  = { 0x0, 0xA0, 0x578, 0xA0, 0x50, 0x6C8 };
     const std::vector<unsigned int> FovChain      = { 0x30, 0x260, 0x558, 0x1F8 };
     const std::vector<unsigned int> BallGlowChain = { 0x30, 0x50, 0x610 };
 
-    // --- OYUNCU DÖNGÜSÜ İÇİN UNREAL ENGINE GENEL YAPISI ---
-    // GWorld -> PersistentLevel -> OwningGameInstance -> LocalPlayers -> ...
+    // --- AKILLI OYUNCU DÖNGÜSÜ OFSETLERİ ---
     constexpr uintptr_t LevelOffset = 0x30;            // UWorld -> PersistentLevel
-    constexpr uintptr_t ActorArrayOffset = 0x98;       // ULevel -> AActor Array (Oyuncu ve Objelerin Listesi)
-    constexpr uintptr_t ActorCountOffset = 0xA0;       // ULevel -> AActor Count (Listedeki Eleman Sayısı)
+    constexpr uintptr_t ActorArrayOffset = 0x98;       // ULevel -> AActor Array
+    constexpr uintptr_t ActorCountOffset = 0xA0;       // ULevel -> AActor Count
     constexpr uintptr_t RootComponentOffset = 0x130;   // AActor -> RootComponent
-    constexpr uintptr_t LocationOffset = 0x11C;        // USceneComponent -> RelativeLocation (Z ekseni genelde +8 veya +4 ofsetindedir)
+    constexpr uintptr_t LocationOffset = 0x11C;        // USceneComponent -> RelativeLocation
 }
 
-// --- [ HAFIZA YÖNETİCİSİ ] ---
+// --- [ GÜVENLİ BELLEK YÖNETİCİSİ ] ---
 namespace Memory {
     HANDLE process_handle = nullptr;
     uintptr_t base_address = 0;
@@ -82,12 +81,13 @@ namespace Memory {
     }
 }
 
+// --- [ MENÜ VE DURUM YAPISI ] ---
 struct CheatStatus {
     bool fov = false;
     bool stamina = false;
     bool speed = false;
     bool ball_glow = false; 
-    bool troll_players = false; // Senin dediğin mantıkla çalışan döngülü hile
+    bool troll_players = false; 
 
     float val_fov = 115.0f;
     float val_speed = 3.0f; 
@@ -97,8 +97,8 @@ struct CheatStatus {
 void MenuCiz() {
     system("cls");
     std::cout << "==================================================\n";
-    std::cout << "     Ohiohook v5.5 - Dongulu Real-Troll Paneli    \n";
-    std::cout << "     Yahya'nin Onayladigi Dogru Algoritma        \n";
+    std::cout << "     Ohiohook v5.6 - Safe-Loop Troll Paneli       \n";
+    std::cout << "     Gorsel Hatalar Temizlendi | skyze x Yahya    \n";
     std::cout << "==================================================\n\n";
 
     auto Bas = [](std::string isim, bool durum, std::string tus, std::string ek = "") {
@@ -111,7 +111,7 @@ void MenuCiz() {
     Bas("Sinirsiz Stamina    ", status.stamina, "2");
     Bas("Speed Hack (Hiz)    ", status.speed, "3", "(Deger: " + std::to_string(status.val_speed).substr(0,3) + ")");
     Bas("Topu Parlat (Glow)  ", status.ball_glow, "4");
-    Bas("Oyunculari Havaya Uc", status.troll_players, "5", "*DONGULU GERCEK TROLL*");
+    Bas("Oyunculari Havaya Uc", status.troll_players, "5", "*Korumali Dongu Sürümü*");
     
     std::cout << "\n [L] Kendini Yukselt (Add Position)\n";
     std::cout << " [M] Ayarlari Canli Guncelle\n";
@@ -124,12 +124,12 @@ void DegerleriAl() {
     std::cout << "[=== HILE DEGER YAPILANDIRMASI ===]\n\n";
     std::cout << "[>] FOV Degeri (Orn: 115): "; std::cin >> status.val_fov;
     std::cout << "[>] SPEED Hiz Kat sayisi (Orn: 3.5): "; std::cin >> status.val_speed;
-    std::col << "\n[+] Veriler kaydedildi! Menuye donuluyor...";
+    std::cout << "\n[+] Veriler kaydedildi! Menuye donuluyor..."; // Hata veren std::col kısmı std::cout olarak düzeltildi
     Sleep(1000);
 }
 
 int main() {
-    SetConsoleTitleW(L"Pro Soccer Online External Hook v5.5");
+    SetConsoleTitleW(L"Pro Soccer Online External Hook v5.6");
     DegerleriAl();
 
     std::cout << "\n[*] Oyun bekleniyor... Lutfen Pro Soccer Online'i baslatin.\n";
@@ -162,7 +162,7 @@ int main() {
 
         if (girdiOldu) MenuCiz();
 
-        // --- TEKIL HILE YAZIMLARI ---
+        // --- TEKİL HİLELERİMİZ ---
         if (status.fov) {
             uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::MainBase2, Offsets::FovChain);
             if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &status.val_fov, sizeof(float), nullptr);
@@ -181,43 +181,43 @@ int main() {
             if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &status.val_glow, sizeof(float), nullptr);
         }
 
-        // --- YAHYA'NIN ALGORİTMASI: DÖNGÜLÜ MASS TROLL (HATA VERMEDEN UÇURMA) ---
+        // --- SEÇENEK 5: KORUMALI AKTÖR DÖNGÜSÜ ---
         if (status.troll_players) {
-            // 1. GWorld adresini oku
             uintptr_t gWorld = 0;
             ReadProcessMemory(Memory::process_handle, (LPCVOID)(Memory::base_address + Offsets::MainBase2), &gWorld, sizeof(gWorld), nullptr);
             
             if (gWorld) {
-                // 2. PersistentLevel adresine gir
                 uintptr_t persistentLevel = 0;
                 ReadProcessMemory(Memory::process_handle, (LPCVOID)(gWorld + Offsets::LevelOffset), &persistentLevel, sizeof(persistentLevel), nullptr);
                 
                 if (persistentLevel) {
-                    // 3. Oyuncu/Aktör dizisinin başlangıcını ve listedeki eleman sayısını çek
                     uintptr_t actorArray = 0;
                     int actorCount = 0;
                     ReadProcessMemory(Memory::process_handle, (LPCVOID)(persistentLevel + Offsets::ActorArrayOffset), &actorArray, sizeof(actorArray), nullptr);
                     ReadProcessMemory(Memory::process_handle, (LPCVOID)(persistentLevel + Offsets::ActorCountOffset), &actorCount, sizeof(actorCount), nullptr);
                     
-                    // Güvenlik sınırı (Oyunun çökmemesi için döngüyü maksimum 200 elemanla sınırlayalım)
-                    if (actorCount > 200) actorCount = 200;
+                    // Güvenlik Duvarı: Çok yüksek döngüleri sınırla
+                    if (actorCount > 150) actorCount = 150;
 
-                    // 4. İŞTE O DÖNGÜ: Tüm oyuncuları tek tek tarıyoruz
                     for (int i = 0; i < actorCount; i++) {
                         uintptr_t currentActor = 0;
-                        // Dizideki sıradaki aktörün pointer adresini oku (Her pointer 8 byte yer kaplar: i * 8)
                         ReadProcessMemory(Memory::process_handle, (LPCVOID)(actorArray + (i * 8)), &currentActor, sizeof(currentActor), nullptr);
                         
                         if (currentActor) {
-                            // 5. Aktörün içindeki RootComponent (Konum merkezini) oku
                             uintptr_t rootComponent = 0;
                             ReadProcessMemory(Memory::process_handle, (LPCVOID)(currentActor + Offsets::RootComponentOffset), &rootComponent, sizeof(rootComponent), nullptr);
                             
                             if (rootComponent) {
-                                // 6. Konumun tam Z eksenine (Yükseklik) ulaşıp 8500.0f değerini basıyoruz!
-                                uintptr_t zLocationAddr = rootComponent + Offsets::LocationOffset + 0x8; // +0x8 Z eksenidir
-                                float yeniYukseklik = 8500.0f;
-                                WriteProcessMemory(Memory::process_handle, (LPVOID)zLocationAddr, &yeniYukseklik, sizeof(float), nullptr);
+                                // Ek Güvenlik: Aktörün konumunu bozmadan önce geçerli bir float içerip içermediğini oku
+                                float testZ = 0.0f;
+                                uintptr_t zLocationAddr = rootComponent + Offsets::LocationOffset + 0x8;
+                                ReadProcessMemory(Memory::process_handle, (LPCVOID)zLocationAddr, &testZ, sizeof(float), nullptr);
+                                
+                                // Unreal harita sınırlarında mantıklı bir konumda olan nesneleri (Muhtemel Oyuncuları) uçur
+                                if (testZ > -5000.0f && testZ < 20000.0f) {
+                                    float yeniYukseklik = 8500.0f;
+                                    WriteProcessMemory(Memory::process_handle, (LPVOID)zLocationAddr, &yeniYukseklik, sizeof(float), nullptr);
+                                }
                             }
                         }
                     }
@@ -225,7 +225,7 @@ int main() {
             }
         }
 
-        // Kendini yükseltme kısayolu (L tuşu)
+        // Kendini havaya kaldırma kısayolu (L tuşu)
         if (GetAsyncKeyState('L') & 0x8000) {
             uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::PositionBase, { 0x0, 0x120, 0x32C });
             if (addr) {
