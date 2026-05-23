@@ -48,7 +48,7 @@ namespace Memory {
                         base_addr = (uintptr_t)me32.modBaseAddr;
                         break;
                     }
-                } while (Memory32NextW(hSnap, &me32)); // Not: Gerekirse Module32NextW
+                } while (Module32NextW(hSnap, &me32)); // Hata veren kısım Module32NextW olarak düzeltildi
             }
             CloseHandle(hSnap);
         }
@@ -85,15 +85,14 @@ struct CheatStatus {
 // --- [ KONSOL ARAYÜZÜNÜ ÇİZME FONKSİYONU ] ---
 void MenuCiz() {
     system("cls");
-    system("Color 0B");
     std::cout << "==================================================\n";
     std::cout << "     Ohiohook v2.5 - Canli Yonetim Paneli        \n";
     std::cout << "     skyze x taskmanager | Durum Kontrolu         \n";
     std::cout << "==================================================\n\n";
 
-    auto Bas(std::string isim, bool durum, std::string tus, std::string ek = "") {
+    auto Bas = [](std::string isim, bool durum, std::string tus, std::string ek = "") {
         std::cout << " [" << tus << "] " << isim << ": " 
-                  << (durum ? "[\x1B[32mON\x1B[0m]" : "[\x1B[31mOFF\x1B[0m]") 
+                  << (durum ? "[ON]" : "[OFF]") 
                   << " " << ek << "\n";
     };
 
@@ -126,7 +125,6 @@ void DegerleriAl() {
 int main() {
     SetConsoleTitleW(L"Pro Soccer Online Ohiohook Toggle Menu");
     
-    // İlk çalıştırmada değerleri isteyelim
     DegerleriAl();
 
     std::cout << "\n[*] Oyun bekleniyor... Lutfen Pro Soccer Online baslatin.\n";
@@ -148,11 +146,9 @@ int main() {
     
     MenuCiz();
 
-    // Ana Hile ve Dinamik Kontrol Döngüsü
     while (true) {
         bool girdiOldu = false;
 
-        // --- KONSOL MENÜ TETİKLEYİCİLERİ (Aç / Kapat) ---
         if (GetAsyncKeyState('1') & 0x1) { status.fov = !status.fov; girdiOldu = true; }
         if (GetAsyncKeyState('2') & 0x1) { status.stamina = !status.stamina; girdiOldu = true; }
         if (GetAsyncKeyState('3') & 0x1) { status.speed = !status.speed; girdiOldu = true; }
@@ -161,76 +157,64 @@ int main() {
         if (GetAsyncKeyState('6') & 0x1) { status.dribbling = !status.dribbling; girdiOldu = true; }
         if (GetAsyncKeyState('7') & 0x1) { status.drone = !status.drone; girdiOldu = true; }
         
-        // Değerleri güncelleme tuşu (M Harfi)
         if (GetAsyncKeyState('M') & 0x1) { 
             DegerleriAl(); 
             girdiOldu = true; 
         }
 
-        // Eğer bir tuşa basıldıysa ekranı temizleyip yeni durumu çiz
         if (girdiOldu) {
             MenuCiz();
         }
-
-        // --- ARKA PLANDA AKTİF HİLELERİ BELLEĞE YAZMA ALANI ---
         
-        // FOV Aktifse Sürekli Yaz
         if (status.fov) {
             uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::FovBase, { 0x30, 0x260, 0x558, 0x1F8 });
             if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &status.val_fov, sizeof(float), nullptr);
         }
 
-        // Sınırsız Stamina Aktifse Sürekli Yaz
         if (status.stamina) {
             uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::StaminaBase, { 0x0, 0xA0, 0x578, 0xA0, 0x50, 0x6C8 });
             float fullStamina = 1.0f;
             if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &fullStamina, sizeof(float), nullptr);
         }
 
-        // Speed Hack Aktifse
         if (status.speed) {
             uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::FovBase, { 0x30, 0x5C8, 0xF8, 0x20, 0x98 });
             if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &status.val_speed, sizeof(float), nullptr);
         }
 
-        // Magic Hands Aktifse
         if (status.magic_hands) {
             uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::FovBase, { 0x30, 0x50, 0x610 });
             if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &status.val_kick, sizeof(float), nullptr);
         }
 
-        // Bug Ball Aktifse
         if (status.bug_ball) {
             uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::FovBase, { 0x30, 0x50, 0x610 });
             float bugValue = 999999.0f;
             if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &bugValue, sizeof(float), nullptr);
         }
 
-        // Dribbling Factor
         if (status.dribbling) {
             uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::FovBase, { 0x30, 0x130, 0x20, 0x98 });
             if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &status.val_dribbling, sizeof(float), nullptr);
         }
 
-        // Add Position (Anlık Tetikleme - L Tuşu)
         if (GetAsyncKeyState('L') & 0x8000) {
             uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::PositionBase, { 0x0, 0x120, 0x32C });
             if (addr) {
                 float currentPos = 0.0f;
                 ReadProcessMemory(Memory::process_handle, (LPCVOID)addr, &currentPos, sizeof(float), nullptr);
-                currentPos += 1.5f; // Konumu yukarı fırlatır
+                currentPos += 1.5f; 
                 WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &currentPos, sizeof(float), nullptr);
-                Sleep(100); // Havada çok hızlı fırlamayı önlemek için küçük bekleme
+                Sleep(100); 
             }
         }
 
-        // Drone Camera
         if (status.drone) {
             uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::StaminaBase, { 0x0, 0xA0, 0x558, 0x11C });
             if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &status.val_drone, sizeof(float), nullptr);
         }
 
-        Sleep(20); // İşlemciyi yormadan stabil döngü akışı
+        Sleep(20); 
     }
 
     if (Memory::process_handle) CloseHandle(Memory::process_handle);
