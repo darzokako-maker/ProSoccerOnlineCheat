@@ -1,0 +1,27 @@
+name: Automated Cheat Build
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Depoyu Bilgisayara Cek (Checkout)
+      uses: actions/checkout@v4
+
+    - name: MSVC Ortamini Yukle ve Kodu Derle (Compile)
+      shell: cmd
+      run: |
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+        cl.exe /EHsc /O2 /DUNICODE /D_UNICODE /Fe:ProSoccerCheat.exe main.cpp user32.lib /link /machine:x64
+
+    - name: Olusan EXE Dosyasini Yukle (Artifact)
+      uses: actions/upload-artifact@v4
+      with:
+        name: Güncel_ProSoccer_Cheat
+        path: ProSoccerCheat.exe
+        
