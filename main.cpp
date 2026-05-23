@@ -3,15 +3,10 @@
 #include <windows.h>
 #include <TlHelp32.h>  
 #include <cstdint>
+#include <string>
 
 // --- [ ADRES VE OFSET YAPILANDIRMASI (UE 5.4.4) ] ---
 namespace Offsets {
-    constexpr uintptr_t GWorld = 0x7E93198;
-    constexpr uintptr_t ULevel_Actors = 0xA0;
-    
-    // Eski çoklu pointer zincirleri yerine doğrudan Dumper-7 yapısı veya
-    // Oyunun stabil alt-bellek haritasına yönelik test ofsetleri kullanılacaktır.
-    // Orijinal projedeki statik örnek ofset yapısı korunmuştur.
     constexpr uintptr_t FovBase = 0x04611F80;
     constexpr uintptr_t StaminaBase = 0x0461CF28;
     constexpr uintptr_t PositionBase = 0x041C9A00;
@@ -22,7 +17,6 @@ namespace Memory {
     HANDLE process_handle = nullptr;
     uintptr_t base_address = 0;
 
-    // Süreç ID'sini bulan fonksiyon (Unicode / Geniş Karakter Destekli)
     DWORD GetProcessId(const wchar_t* process_name) {
         DWORD process_id = 0;
         HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -42,7 +36,6 @@ namespace Memory {
         return process_id;
     }
 
-    // Oyunun ana modül adresini çeken fonksiyon
     uintptr_t GetModuleBase(DWORD process_id, const wchar_t* module_name) {
         uintptr_t base_addr = 0;
         HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, process_id);
@@ -55,53 +48,88 @@ namespace Memory {
                         base_addr = (uintptr_t)me32.modBaseAddr;
                         break;
                     }
-                } while (Module32NextW(hSnap, &me32));
+                } while (Memory32NextW(hSnap, &me32)); // Not: Gerekirse Module32NextW
             }
             CloseHandle(hSnap);
         }
         return base_addr;
     }
 
-    // Pointer zincirlerini güvenli bir şekilde çözen şablon
     uintptr_t ReadPointerChain(HANDLE hProc, uintptr_t base, std::vector<unsigned int> offsets) {
         uintptr_t addr = base;
         for (unsigned int i = 0; i < offsets.size(); ++i) {
-            ReadProcessMemory(hProc, (LPCVOID)addr, &addr, sizeof(uintptr_t), nullptr);
+            if (!ReadProcessMemory(hProc, (LPCVOID)addr, &addr, sizeof(uintptr_t), nullptr)) return 0;
             addr += offsets[i];
         }
         return addr;
     }
 }
 
-int main() {
-    // Görsel ASCII Karşılama Ekranı
-    SetConsoleTitleW(L"Pro Soccer Online Ohiohook External v2.0");
-    system("Color 0E");
-    std::cout << "  OOO   H   H  IIIII  OOO  \n"
-                 " O   O  H   H    I   O   O \n"
-                 " O   O  HHHHH    I   O   O \n"
-                 " O   O  H   H    I   O   O \n"
-                 "  OOO   H   H  IIIII  OOO  \n\n";
-    Sleep(800);
+// --- [ DURUM VE DEĞER DEĞİŞKENLERİ ] ---
+struct CheatStatus {
+    bool fov = false;
+    bool stamina = false;
+    bool speed = false;
+    bool magic_hands = false;
+    bool bug_ball = false;
+    bool dribbling = false;
+    bool drone = false;
+
+    float val_fov = 110.0f;
+    float val_speed = 2.5f;
+    float val_kick = 5.0f;
+    float val_dribbling = 3.0f;
+    float val_drone = 25.0f;
+} status;
+
+// --- [ KONSOL ARAYÜZÜNÜ ÇİZME FONKSİYONU ] ---
+void MenuCiz() {
     system("cls");
+    system("Color 0B");
+    std::cout << "==================================================\n";
+    std::cout << "     Ohiohook v2.5 - Canli Yonetim Paneli        \n";
+    std::cout << "     skyze x taskmanager | Durum Kontrolu         \n";
+    std::cout << "==================================================\n\n";
 
-    std::cout << "====================================\n";
-    std::cout << "       ohiohook - External Source   \n";
-    std::cout << "       skyze x taskmanager          \n";
-    std::cout << "====================================\n\n";
+    auto Bas(std::string isim, bool durum, std::string tus, std::string ek = "") {
+        std::cout << " [" << tus << "] " << isim << ": " 
+                  << (durum ? "[\x1B[32mON\x1B[0m]" : "[\x1B[31mOFF\x1B[0m]") 
+                  << " " << ek << "\n";
+    };
 
-    // Girdi Değerlerini Alma Alanı
-    float IstedigimizFov, IstedigimizSpeed, IstedigimizKickPower, IstedigimizDribbling, IstedigimizDrone;
+    Bas("FOV Modifikasyonu", status.fov, "1", "(Deger: " + std::to_string((int)status.val_fov) + ")");
+    Bas("Sinizsiz Stamina  ", status.stamina, "2");
+    Bas("Speed Hack        ", status.speed, "3", "(Hiz: " + std::to_string(status.val_speed).substr(0,3) + ")");
+    Bas("Magic Hands       ", status.magic_hands, "4", "(Guc: " + std::to_string(status.val_kick).substr(0,3) + ")");
+    Bas("Bug Ball          ", status.bug_ball, "5");
+    Bas("Dribbling Factor  ", status.dribbling, "6", "(Faktor: " + std::to_string(status.val_dribbling).substr(0,3) + ")");
+    Bas("Drone Camera      ", status.drone, "7", "(Yukseklik: " + std::to_string(status.val_drone).substr(0,3) + ")");
     
-    std::cout << "[>] FOV Degeri girin (Orn: 110): "; std::cin >> IstedigimizFov;
-    std::cout << "[>] SPEED HACK Degeri girin (Orn: 2.5): "; std::cin >> IstedigimizSpeed;
-    std::cout << "[>] MAGIC HANDS Degeri girin: "; std::cin >> IstedigimizKickPower;
-    std::cout << "[>] DRIBBLING FACTOR Degeri girin: "; std::cin >> IstedigimizDribbling;
-    std::cout << "[>] DRONE CAMERA Degeri girin: "; std::cin >> IstedigimizDrone;
+    std::cout << "\n [L] Konumu Yukselt (Add Position)\n";
+    std::cout << " [M] Degerleri Yeniden Ayarla / Guncelle\n";
+    std::cout << "==================================================\n";
+    std::cout << "[*] Acip kapatmak icin klavyeden numaralara basin...\n";
+}
+
+void DegerleriAl() {
+    system("cls");
+    std::cout << "[=== DEGER AYARLAMA MENUSU ===]\n\n";
+    std::cout << "[>] Yeni FOV Degeri girin (Orn: 110): "; std::cin >> status.val_fov;
+    std::cout << "[>] Yeni SPEED HACK Hiz Degeri (Orn: 2.5): "; std::cin >> status.val_speed;
+    std::cout << "[>] Yeni MAGIC HANDS Vurus Gucu: "; std::cin >> status.val_kick;
+    std::cout << "[>] Yeni DRIBBLING FACTOR Degeri: "; std::cin >> status.val_dribbling;
+    std::cout << "[>] Yeni DRONE CAMERA Yukseklik Degeri: "; std::cin >> status.val_drone;
+    std::cout << "\n[+] Degerler kaydedildi! Menuye donuluyor...";
+    Sleep(1000);
+}
+
+int main() {
+    SetConsoleTitleW(L"Pro Soccer Online Ohiohook Toggle Menu");
+    
+    // İlk çalıştırmada değerleri isteyelim
+    DegerleriAl();
 
     std::cout << "\n[*] Oyun bekleniyor... Lutfen Pro Soccer Online baslatin.\n";
-
-    // Sürece tek seferlik ve kalıcı bağlanma döngüsü
     const wchar_t* oyunAdi = L"ProSoccerOnline-Win64-Shipping.exe";
     DWORD pID = 0;
     while (pID == 0) {
@@ -111,83 +139,100 @@ int main() {
 
     Memory::process_handle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pID);
     if (!Memory::process_handle) {
-        std::cout << "[-] Oyuna baglanilamadi! Yonetici olarak calistirmayi deneyin.\n";
+        std::cout << "[-] Hafiza kapisi acilamadi! Yonetici olarak calistirin.\n";
         system("pause");
         return 0;
     }
 
     Memory::base_address = Memory::GetModuleBase(pID, oyunAdi);
-    std::cout << "[+] Baglanti Basarili! Base Adresi: 0x" << std::hex << Memory::base_address << "\n\n";
     
-    std::cout << "[=== KISAYOL TUSLARI AKTIF ===]\n";
-    std::cout << "[R] -> FOV'u Uygula\n";
-    std::cout << "[Q] -> SINIRSIZ STAMINA\n";
-    std::cout << "[H] -> SPEED HACK Aktif Et\n";
-    std::cout << "[F] -> MAGIC HANDS Kilitle\n";
-    std::cout << "[Z] -> BUG BALL\n";
-    std::cout << "[V] -> DRIBBLING YUKLE\n";
-    std::cout << "[L] -> KONUMU YUKSELT (ADD POSITION)\n";
-    std::cout << "[X] -> DRONE kamerasina gec\n\n";
+    MenuCiz();
 
-    // Ana Hile Döngüsü (Performans optimizasyonu için Sleep eklendi)
+    // Ana Hile ve Dinamik Kontrol Döngüsü
     while (true) {
-        // FOV (R Tuşu)
-        if (GetAsyncKeyState('R') & 0x8000) {
-            uintptr_t targetAddr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::FovBase, { 0x30, 0x260, 0x558, 0x1F8 });
-            WriteProcessMemory(Memory::process_handle, (LPVOID)targetAddr, &IstedigimizFov, sizeof(float), nullptr);
+        bool girdiOldu = false;
+
+        // --- KONSOL MENÜ TETİKLEYİCİLERİ (Aç / Kapat) ---
+        if (GetAsyncKeyState('1') & 0x1) { status.fov = !status.fov; girdiOldu = true; }
+        if (GetAsyncKeyState('2') & 0x1) { status.stamina = !status.stamina; girdiOldu = true; }
+        if (GetAsyncKeyState('3') & 0x1) { status.speed = !status.speed; girdiOldu = true; }
+        if (GetAsyncKeyState('4') & 0x1) { status.magic_hands = !status.magic_hands; girdiOldu = true; }
+        if (GetAsyncKeyState('5') & 0x1) { status.bug_ball = !status.bug_ball; girdiOldu = true; }
+        if (GetAsyncKeyState('6') & 0x1) { status.dribbling = !status.dribbling; girdiOldu = true; }
+        if (GetAsyncKeyState('7') & 0x1) { status.drone = !status.drone; girdiOldu = true; }
+        
+        // Değerleri güncelleme tuşu (M Harfi)
+        if (GetAsyncKeyState('M') & 0x1) { 
+            DegerleriAl(); 
+            girdiOldu = true; 
         }
 
-        // STAMINA (Q Tuşu)
-        if (GetAsyncKeyState('Q') & 0x8000) {
-            uintptr_t targetAddr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::StaminaBase, { 0x0, 0xA0, 0x578, 0xA0, 0x50, 0x6C8 });
+        // Eğer bir tuşa basıldıysa ekranı temizleyip yeni durumu çiz
+        if (girdiOldu) {
+            MenuCiz();
+        }
+
+        // --- ARKA PLANDA AKTİF HİLELERİ BELLEĞE YAZMA ALANI ---
+        
+        // FOV Aktifse Sürekli Yaz
+        if (status.fov) {
+            uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::FovBase, { 0x30, 0x260, 0x558, 0x1F8 });
+            if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &status.val_fov, sizeof(float), nullptr);
+        }
+
+        // Sınırsız Stamina Aktifse Sürekli Yaz
+        if (status.stamina) {
+            uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::StaminaBase, { 0x0, 0xA0, 0x578, 0xA0, 0x50, 0x6C8 });
             float fullStamina = 1.0f;
-            WriteProcessMemory(Memory::process_handle, (LPVOID)targetAddr, &fullStamina, sizeof(float), nullptr);
+            if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &fullStamina, sizeof(float), nullptr);
         }
 
-        // SPEEDHACK (H Tuşu)
-        if (GetAsyncKeyState('H') & 0x8000) {
-            uintptr_t targetAddr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::FovBase, { 0x30, 0x5C8, 0xF8, 0x20, 0x98 });
-            WriteProcessMemory(Memory::process_handle, (LPVOID)targetAddr, &IstedigimizSpeed, sizeof(float), nullptr);
+        // Speed Hack Aktifse
+        if (status.speed) {
+            uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::FovBase, { 0x30, 0x5C8, 0xF8, 0x20, 0x98 });
+            if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &status.val_speed, sizeof(float), nullptr);
         }
 
-        // MAGIC HANDS (F Tuşu)
-        if (GetAsyncKeyState('F') & 0x8000) {
-            uintptr_t targetAddr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::FovBase, { 0x30, 0x50, 0x610 });
-            WriteProcessMemory(Memory::process_handle, (LPVOID)targetAddr, &IstedigimizKickPower, sizeof(float), nullptr);
+        // Magic Hands Aktifse
+        if (status.magic_hands) {
+            uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::FovBase, { 0x30, 0x50, 0x610 });
+            if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &status.val_kick, sizeof(float), nullptr);
         }
 
-        // BUG BALL (Z Tuşu)
-        if (GetAsyncKeyState('Z') & 0x8000) {
-            uintptr_t targetAddr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::FovBase, { 0x30, 0x50, 0x610 });
+        // Bug Ball Aktifse
+        if (status.bug_ball) {
+            uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::FovBase, { 0x30, 0x50, 0x610 });
             float bugValue = 999999.0f;
-            WriteProcessMemory(Memory::process_handle, (LPVOID)targetAddr, &bugValue, sizeof(float), nullptr);
+            if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &bugValue, sizeof(float), nullptr);
         }
 
-        // DRIBBLING FACTOR (V Tuşu)
-        if (GetAsyncKeyState('V') & 0x8000) {
-            uintptr_t targetAddr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::FovBase, { 0x30, 0x130, 0x20, 0x98 });
-            WriteProcessMemory(Memory::process_handle, (LPVOID)targetAddr, &IstedigimizDribbling, sizeof(float), nullptr);
+        // Dribbling Factor
+        if (status.dribbling) {
+            uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::FovBase, { 0x30, 0x130, 0x20, 0x98 });
+            if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &status.val_dribbling, sizeof(float), nullptr);
         }
 
-        // ADD POSITION (L Tuşu)
+        // Add Position (Anlık Tetikleme - L Tuşu)
         if (GetAsyncKeyState('L') & 0x8000) {
-            uintptr_t targetAddr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::PositionBase, { 0x0, 0x120, 0x32C });
-            float currentPos = 0.0f;
-            ReadProcessMemory(Memory::process_handle, (LPCVOID)targetAddr, &currentPos, sizeof(float), nullptr);
-            currentPos += 1.0f;
-            WriteProcessMemory(Memory::process_handle, (LPVOID)targetAddr, &currentPos, sizeof(float), nullptr);
+            uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::PositionBase, { 0x0, 0x120, 0x32C });
+            if (addr) {
+                float currentPos = 0.0f;
+                ReadProcessMemory(Memory::process_handle, (LPCVOID)addr, &currentPos, sizeof(float), nullptr);
+                currentPos += 1.5f; // Konumu yukarı fırlatır
+                WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &currentPos, sizeof(float), nullptr);
+                Sleep(100); // Havada çok hızlı fırlamayı önlemek için küçük bekleme
+            }
         }
 
-        // DRONE CAMERA (X Tuşu)
-        if (GetAsyncKeyState('X') & 0x8000) {
-            uintptr_t targetAddr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::StaminaBase, { 0x0, 0xA0, 0x558, 0x11C });
-            WriteProcessMemory(Memory::process_handle, (LPVOID)targetAddr, &IstedigimizDrone, sizeof(float), nullptr);
+        // Drone Camera
+        if (status.drone) {
+            uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::StaminaBase, { 0x0, 0xA0, 0x558, 0x11C });
+            if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &status.val_drone, sizeof(float), nullptr);
         }
 
-        Sleep(30); // CPU'yu %100 sömürmemesi ve stabil tarama yapması için hayati gecikme
+        Sleep(20); // İşlemciyi yormadan stabil döngü akışı
     }
 
     if (Memory::process_handle) CloseHandle(Memory::process_handle);
     return 0;
 }
-
