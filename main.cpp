@@ -5,24 +5,19 @@
 #include <cstdint>
 #include <string>
 
-// --- [ UNREAL ENGINE GÜNCEL OFSET YAPILANDIRMASI ] ---
+// --- [ GÜNCEL VE KESİN OFSET YAPISI (64-BIT UYUMLU) ] ---
 namespace Offsets {
-    constexpr uintptr_t MainBase1 = 0x0461CF28;    // Hız ve Stamina Ana Adresi
-    constexpr uintptr_t MainBase2 = 0x04611F80;    // FOV ve GWorld Ana Adresi
-    constexpr uintptr_t PositionBase = 0x041C9A00; // Kendimizi yükseltme adresi
+    // NOT: Oyun güncellendiğinde Cheat Engine ile sadece bu 3 ana adresi (Base) yenilemen yeterlidir.
+    uintptr_t MainBase1 = 0x0461CF28; // Hız ve Stamina Ana Adresi
+    uintptr_t MainBase2 = 0x04611F80; // FOV, Top ve Oyuncu Verileri Ana Adresi
+    uintptr_t PositionBase = 0x041C9A00; // Konum Değiştirme Taban Adresi
 
-    // Sabit Pointer Zincirleri
+    // Tam Pointer Zincirleri (Unreal Engine 64-bit Yapısı)
     const std::vector<unsigned int> SpeedChain    = { 0x0, 0xA0, 0x558, 0x18, 0x118 };
     const std::vector<unsigned int> StaminaChain  = { 0x0, 0xA0, 0x578, 0xA0, 0x50, 0x6C8 };
     const std::vector<unsigned int> FovChain      = { 0x30, 0x260, 0x558, 0x1F8 };
-    const std::vector<unsigned int> BallGlowChain = { 0x30, 0x50, 0x610 };
-
-    // --- AKILLI OYUNCU DÖNGÜSÜ OFSETLERİ ---
-    constexpr uintptr_t LevelOffset = 0x30;            // UWorld -> PersistentLevel
-    constexpr uintptr_t ActorArrayOffset = 0x98;       // ULevel -> AActor Array
-    constexpr uintptr_t ActorCountOffset = 0xA0;       // ULevel -> AActor Count
-    constexpr uintptr_t RootComponentOffset = 0x130;   // AActor -> RootComponent
-    constexpr uintptr_t LocationOffset = 0x11C;        // USceneComponent -> RelativeLocation
+    const std::vector<unsigned int> BallGlowChain = { 0x30, 0x50, 0x610 }; 
+    const std::vector<unsigned int> LocalPlayerZ  = { 0x0, 0x120, 0x32C }; // Kendi Z koordinatın
 }
 
 // --- [ GÜVENLİ BELLEK YÖNETİCİSİ ] ---
@@ -68,10 +63,12 @@ namespace Memory {
         return base_addr;
     }
 
+    // 64-Bit Kesin Okuma Yapan Pointer Zincir Çözücü
     uintptr_t ReadPointerChain(HANDLE hProc, uintptr_t base, const std::vector<unsigned int>& offsets) {
         uintptr_t addr = base;
         for (size_t i = 0; i < offsets.size(); ++i) {
             uintptr_t next_addr = 0;
+            // 64-bit mimaride pointer'lar her zaman 8 byte (sizeof(uintptr_t)) olarak okunmalıdır
             if (!ReadProcessMemory(hProc, (LPCVOID)addr, &next_addr, sizeof(uintptr_t), nullptr)) {
                 return 0; 
             }
@@ -81,29 +78,29 @@ namespace Memory {
     }
 }
 
-// --- [ MENÜ VE DURUM YAPISI ] ---
+// --- [ HİLE PANELİ DURUM KONTROLÜ ] ---
 struct CheatStatus {
     bool fov = false;
     bool stamina = false;
     bool speed = false;
     bool ball_glow = false; 
-    bool troll_players = false; 
+    bool fly_up = false; // Güvenli uçma/yükselme modu
 
     float val_fov = 115.0f;
     float val_speed = 3.0f; 
-    float val_glow = 999999.0f; 
+    float val_glow = 9999.0f; 
 } status;
 
 void MenuCiz() {
     system("cls");
     std::cout << "==================================================\n";
-    std::cout << "     Ohiohook v5.6 - Safe-Loop Troll Paneli       \n";
-    std::cout << "     Gorsel Hatalar Temizlendi | skyze x Yahya    \n";
+    std::cout << "     Ohiohook v5.5 - VIP Canli Yonetim Paneli     \n";
+    std::cout << "          64-Bit Stabilized Architecture          \n";
     std::cout << "==================================================\n\n";
 
     auto Bas = [](std::string isim, bool durum, std::string tus, std::string ek = "") {
         std::cout << " [" << tus << "] " << isim << ": " 
-                  << (durum ? "[ON]" : "[OFF]") 
+                  << (durum ? "[\x1B[32mON\x1B[0m]" : "[\x1B[31mOFF\x1B[0m]") 
                   << " " << ek << "\n";
     };
 
@@ -111,12 +108,12 @@ void MenuCiz() {
     Bas("Sinirsiz Stamina    ", status.stamina, "2");
     Bas("Speed Hack (Hiz)    ", status.speed, "3", "(Deger: " + std::to_string(status.val_speed).substr(0,3) + ")");
     Bas("Topu Parlat (Glow)  ", status.ball_glow, "4");
-    Bas("Oyunculari Havaya Uc", status.troll_players, "5", "*Korumali Dongu Sürümü*");
+    Bas("Oto Yukari Ucma     ", status.fly_up, "5", "(Yorunge Modu)");
     
-    std::cout << "\n [L] Kendini Yukselt (Add Position)\n";
+    std::cout << "\n [L] Kendini Yukselt (Anlik Işınlanma)\n";
     std::cout << " [M] Ayarlari Canli Guncelle\n";
     std::cout << "==================================================\n";
-    std::cout << "[*] Ozellikleri acip kapatmak icin sayilara basin...\n";
+    std::cout << "[*] Seçim yapmak için klavyedeki sayılara basın...\n";
 }
 
 void DegerleriAl() {
@@ -124,32 +121,43 @@ void DegerleriAl() {
     std::cout << "[=== HILE DEGER YAPILANDIRMASI ===]\n\n";
     std::cout << "[>] FOV Degeri (Orn: 115): "; std::cin >> status.val_fov;
     std::cout << "[>] SPEED Hiz Kat sayisi (Orn: 3.5): "; std::cin >> status.val_speed;
-    std::cout << "\n[+] Veriler kaydedildi! Menuye donuluyor..."; // Hata veren std::col kısmı std::cout olarak düzeltildi
-    Sleep(1000);
+    std::cout << "\n[+] Veriler esitlendi! Menuye donuluyor...";
+    Sleep(800);
 }
 
 int main() {
-    SetConsoleTitleW(L"Pro Soccer Online External Hook v5.6");
-    DegerleriAl();
-
-    std::cout << "\n[*] Oyun bekleniyor... Lutfen Pro Soccer Online'i baslatin.\n";
+    SetConsoleTitleW(L"Pro Soccer Online External Hook v5.5");
+    
+    std::cout << "[*] Oyun bekleniyor... Lutfen Pro Soccer Online'i baslatin.\n";
     const wchar_t* oyunAdi = L"ProSoccerOnline-Win64-Shipping.exe";
+    
     DWORD pID = 0;
     while (pID == 0) {
         pID = Memory::GetProcessId(oyunAdi);
         Sleep(500);
     }
 
+    // Belleğe tam yetkiyle bağlanmayı dene
     Memory::process_handle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pID);
     if (!Memory::process_handle) {
-        std::cout << "[-] Hafiza kapisi acilamadi! Yonetici olarak calistirin.\n";
+        std::cout << "\n[-] Hafiza kapisi acilamadi!\n";
+        std::cout << "[!] SEBEP: Anti-cheat (EAC) aktif veya programı 'Yonetici Olarak' calistirmadiniz.\n";
         system("pause");
         return 0;
     }
 
     Memory::base_address = Memory::GetModuleBase(pID, oyunAdi);
+    if (Memory::base_address == 0) {
+        std::cout << "[-] Modul taban adresi alinamadi!\n";
+        CloseHandle(Memory::process_handle);
+        system("pause");
+        return 0;
+    }
+
+    DegerleriAl();
     MenuCiz();
 
+    // Ana Döngü
     while (true) {
         bool girdiOldu = false;
 
@@ -157,87 +165,68 @@ int main() {
         if (GetAsyncKeyState('2') & 0x1) { status.stamina = !status.stamina; girdiOldu = true; }
         if (GetAsyncKeyState('3') & 0x1) { status.speed = !status.speed; girdiOldu = true; }
         if (GetAsyncKeyState('4') & 0x1) { status.ball_glow = !status.ball_glow; girdiOldu = true; }
-        if (GetAsyncKeyState('5') & 0x1) { status.troll_players = !status.troll_players; girdiOldu = true; }
-        if (GetAsyncKeyState('M') & 0x1) { DegerleriAl(); girdiOldu = true; }
+        if (GetAsyncKeyState('5') & 0x1) { status.fly_up = !status.fly_up; girdiOldu = true; }
+        
+        if (GetAsyncKeyState('M') & 0x1) { 
+            DegerleriAl(); 
+            girdiOldu = true; 
+        }
 
-        if (girdiOldu) MenuCiz();
+        if (girdiOldu) {
+            MenuCiz();
+        }
 
-        // --- TEKİL HİLELERİMİZ ---
+        // --- CANLI BELLEK YAZMA İŞLEMLERİ ---
+
+        // 1. FOV Hilesi
         if (status.fov) {
             uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::MainBase2, Offsets::FovChain);
             if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &status.val_fov, sizeof(float), nullptr);
         }
+
+        // 2. Sınırsız Stamina Hilesi
         if (status.stamina) {
             uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::MainBase1, Offsets::StaminaChain);
             float fullStamina = 1.0f; 
             if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &fullStamina, sizeof(float), nullptr);
         }
+
+        // 3. Hız Hilesi
         if (status.speed) {
             uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::MainBase1, Offsets::SpeedChain);
             if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &status.val_speed, sizeof(float), nullptr);
         }
+
+        // 4. Top Parlatma Hilesi
         if (status.ball_glow) {
             uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::MainBase2, Offsets::BallGlowChain);
             if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &status.val_glow, sizeof(float), nullptr);
         }
 
-        // --- SEÇENEK 5: KORUMALI AKTÖR DÖNGÜSÜ ---
-        if (status.troll_players) {
-            uintptr_t gWorld = 0;
-            ReadProcessMemory(Memory::process_handle, (LPCVOID)(Memory::base_address + Offsets::MainBase2), &gWorld, sizeof(gWorld), nullptr);
-            
-            if (gWorld) {
-                uintptr_t persistentLevel = 0;
-                ReadProcessMemory(Memory::process_handle, (LPCVOID)(gWorld + Offsets::LevelOffset), &persistentLevel, sizeof(persistentLevel), nullptr);
-                
-                if (persistentLevel) {
-                    uintptr_t actorArray = 0;
-                    int actorCount = 0;
-                    ReadProcessMemory(Memory::process_handle, (LPCVOID)(persistentLevel + Offsets::ActorArrayOffset), &actorArray, sizeof(actorArray), nullptr);
-                    ReadProcessMemory(Memory::process_handle, (LPCVOID)(persistentLevel + Offsets::ActorCountOffset), &actorCount, sizeof(actorCount), nullptr);
-                    
-                    // Güvenlik Duvarı: Çok yüksek döngüleri sınırla
-                    if (actorCount > 150) actorCount = 150;
-
-                    for (int i = 0; i < actorCount; i++) {
-                        uintptr_t currentActor = 0;
-                        ReadProcessMemory(Memory::process_handle, (LPCVOID)(actorArray + (i * 8)), &currentActor, sizeof(currentActor), nullptr);
-                        
-                        if (currentActor) {
-                            uintptr_t rootComponent = 0;
-                            ReadProcessMemory(Memory::process_handle, (LPCVOID)(currentActor + Offsets::RootComponentOffset), &rootComponent, sizeof(rootComponent), nullptr);
-                            
-                            if (rootComponent) {
-                                // Ek Güvenlik: Aktörün konumunu bozmadan önce geçerli bir float içerip içermediğini oku
-                                float testZ = 0.0f;
-                                uintptr_t zLocationAddr = rootComponent + Offsets::LocationOffset + 0x8;
-                                ReadProcessMemory(Memory::process_handle, (LPCVOID)zLocationAddr, &testZ, sizeof(float), nullptr);
-                                
-                                // Unreal harita sınırlarında mantıklı bir konumda olan nesneleri (Muhtemel Oyuncuları) uçur
-                                if (testZ > -5000.0f && testZ < 20000.0f) {
-                                    float yeniYukseklik = 8500.0f;
-                                    WriteProcessMemory(Memory::process_handle, (LPVOID)zLocationAddr, &yeniYukseklik, sizeof(float), nullptr);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Kendini havaya kaldırma kısayolu (L tuşu)
-        if (GetAsyncKeyState('L') & 0x8000) {
-            uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::PositionBase, { 0x0, 0x120, 0x32C });
+        // 5. Sürekli Yukarı Doğru Uçma (Z eksenini sürekli arttırarak havada tutar)
+        if (status.fly_up) {
+            uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::PositionBase, Offsets::LocalPlayerZ);
             if (addr) {
                 float currentPos = 0.0f;
                 ReadProcessMemory(Memory::process_handle, (LPCVOID)addr, &currentPos, sizeof(float), nullptr);
-                currentPos += 2.0f; 
+                currentPos += 1.5f; 
                 WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &currentPos, sizeof(float), nullptr);
-                Sleep(50); 
             }
         }
 
-        Sleep(25); 
+        // Kısayol: L Tuşuna Basılı Tutulduğunda Kendini Yukarı Fırlatma
+        if (GetAsyncKeyState('L') & 0x8000) {
+            uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::PositionBase, Offsets::LocalPlayerZ);
+            if (addr) {
+                float currentPos = 0.0f;
+                ReadProcessMemory(Memory::process_handle, (LPCVOID)addr, &currentPos, sizeof(float), nullptr);
+                currentPos += 8.0f; 
+                WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &currentPos, sizeof(float), nullptr);
+                Sleep(20); 
+            }
+        }
+
+        Sleep(20); // CPU Stabilizasyonu
     }
 
     if (Memory::process_handle) CloseHandle(Memory::process_handle);
