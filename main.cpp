@@ -1,234 +1,201 @@
-#include <iostream> 
-#include <vector> 
 #include <windows.h>
-#include <TlHelp32.h>  
-#include <cstdint>
 #include <string>
+#include <iostream>
+#include <curl/curl.h>
+#include <nlohmann/json.hpp>
 
-// --- [ GÜNCEL VE KESİN OFSET YAPISI (64-BIT UYUMLU) ] ---
-namespace Offsets {
-    // NOT: Oyun güncellendiğinde Cheat Engine ile sadece bu 3 ana adresi (Base) yenilemen yeterlidir.
-    uintptr_t MainBase1 = 0x0461CF28; // Hız ve Stamina Ana Adresi
-    uintptr_t MainBase2 = 0x04611F80; // FOV, Top ve Oyuncu Verileri Ana Adresi
-    uintptr_t PositionBase = 0x041C9A00; // Konum Değiştirme Taban Adresi
+using json = nlohmann::json;
+using namespace std;
 
-    // Tam Pointer Zincirleri (Unreal Engine 64-bit Yapısı)
-    const std::vector<unsigned int> SpeedChain    = { 0x0, 0xA0, 0x558, 0x18, 0x118 };
-    const std::vector<unsigned int> StaminaChain  = { 0x0, 0xA0, 0x578, 0xA0, 0x50, 0x6C8 };
-    const std::vector<unsigned int> FovChain      = { 0x30, 0x260, 0x558, 0x1F8 };
-    const std::vector<unsigned int> BallGlowChain = { 0x30, 0x50, 0x610 }; 
-    const std::vector<unsigned int> LocalPlayerZ  = { 0x0, 0x120, 0x32C }; // Kendi Z koordinatın
+// Menü ID tanımlamaları
+#define ID_MENU_SORUSOR 1001
+#define ID_MENU_TEMIZLE 1002
+#define ID_MENU_CIKIS    1003
+#define ID_MENU_HAKKINDA 1004
+#define ID_BUTON_GONDER  1005
+
+// Global Bileşenler
+HWND hEditOutput, hEditInput, hBtnGonder;
+// Verilen Groq API Key doğrudan koda entegre edildi
+string apiKey = "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"; 
+
+// Curl için callback
+size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
+    ((string*)userp)->append((char*)contents, size * nmemb);
+    return size * nmemb;
 }
 
-// --- [ GÜVENLİ BELLEK YÖNETİCİSİ ] ---
-namespace Memory {
-    HANDLE process_handle = nullptr;
-    uintptr_t base_address = 0;
+// Groq API İstek Fonksiyonu
+string AskGroq(const string& prompt) {
+    CURL* curl;
+    CURLcode res;
+    string readBuffer;
 
-    DWORD GetProcessId(const wchar_t* process_name) {
-        DWORD process_id = 0;
-        HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (hSnap != INVALID_HANDLE_VALUE) {
-            PROCESSENTRY32W pe32;
-            pe32.dwSize = sizeof(PROCESSENTRY32W);
-            if (Process32FirstW(hSnap, &pe32)) {
-                do {
-                    if (_wcsicmp(pe32.szExeFile, process_name) == 0) {
-                        process_id = pe32.th32ProcessID;
-                        break;
+    curl = curl_easy_init();
+    if(curl) {
+        struct curl_slist* headers = NULL;
+        headers = curl_slist_append(headers, "Content-Type: application/json");
+        string auth_header = "Authorization: Bearer " + apiKey;
+        headers = curl_slist_append(headers, auth_header.c_str());
+
+        json payload;
+        payload["model"] = "llama-3.3-70b-versatile";
+        payload["messages"] = json::array({{{"role", "user"}, {"content", prompt}}});
+        string json_str = payload.dump();
+
+        curl_easy_setopt(curl, CURLOPT_URL, "https://api.groq.com/openai/v1/chat/completions");
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_str.c_str());
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+
+        res = curl_easy_perform(curl);
+        curl_easy_cleanup(curl);
+
+        if(res != CURLE_OK) return "Hata: API baglantisi basarisiz.";
+
+        try {
+            auto res_json = json::parse(readBuffer);
+            if (res_json.contains("choices") && !res_json["choices"].empty()) {
+                return res_json["choices"][0]["message"]["content"];
+            } else if (res_json.contains("error")) {
+                return "API Hatasi: " + res_json["error"]["message"].get<string>();
+            }
+        } catch (...) {
+            return "Yanit cozumlenirken bir hata olustu.";
+        }
+    }
+    return "Bir hata olustu veya API sunucusuna ulasilamadi.";
+}
+
+// Klasik Windows Menü Çubuğunu Oluşturan Fonksiyon
+void EkleMenu(HWND hwnd) {
+    HMENU hMenuBar = CreateMenu();
+    HMENU hMenuDosya = CreateMenu();
+    HMENU hMenuYardim = CreateMenu();
+
+    // Üst Menü elemanları (IDA Pro stili yerleşim)
+    AppendMenuW(hMenuDosya, MF_STRING, ID_MENU_SORUSOR, L"Yapay Zekaya Odaklan");
+    AppendMenuW(hMenuDosya, MF_STRING, ID_MENU_TEMIZLE, L"Ekrani Temizle");
+    AppendMenuW(hMenuDosya, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(hMenuDosya, MF_STRING, ID_MENU_CIKIS, L"Cikis");
+
+    AppendMenuW(hMenuYardim, MF_STRING, ID_MENU_HAKKINDA, L"Uygulama Hakkinda");
+
+    AppendMenuW(hMenuBar, MF_POPUP, (UINT_PTR)hMenuDosya, L"Yapay Zeka (AI)");
+    AppendMenuW(hMenuBar, MF_POPUP, (UINT_PTR)hMenuYardim, L"Yardim");
+
+    SetMenu(hwnd, hMenuBar);
+}
+
+// Window Procedure (Mesaj Döngüsü Yönetimi)
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch(msg) {
+        case WM_CREATE: {
+            EkleMenu(hwnd);
+
+            // Çıktı Geçmiş Alanı (Klasik Salt Okunur Edit Kontrolü)
+            hEditOutput = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"--- AI-IDA Professional Enterprise ---\r\nModel: Llama 3.3 Versatile (Groq API)\r\nDurum: Baglanti Hazir.\r\n\r\n", 
+                WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
+                10, 10, 560, 300, hwnd, NULL, NULL, NULL);
+
+            // Kullanıcı Mesaj Giriş Alanı
+            hEditInput = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", 
+                WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+                10, 320, 450, 25, hwnd, NULL, NULL, NULL);
+
+            // Gönder Butonu
+            hBtnGonder = CreateWindowW(L"BUTTON", L"Gonder", 
+                WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+                470, 320, 100, 25, hwnd, (HMENU)ID_BUTON_GONDER, NULL, NULL);
+            
+            break;
+        }
+        case WM_COMMAND: {
+            switch(LOWORD(wParam)) {
+                case ID_MENU_SORUSOR:
+                    SetFocus(hEditInput);
+                    break;
+                case ID_MENU_TEMIZLE:
+                    // Çıktı ekranını sıfırla
+                    SetWindowTextW(hEditOutput, L"--- Ekran Temizlendi ---\r\n\r\n");
+                    break;
+                case ID_MENU_CIKIS:
+                    DestroyWindow(hwnd);
+                    break;
+                case ID_MENU_HAKKINDA:
+                    MessageBoxW(hwnd, L"AI-IDA v1.0 Professional\n\nGroq API ve yerel Win32 API kullanilarak hazirlanmistir.\nModel: Llama 3.3 Versatile", L"Hakkinda", MB_OK | MB_ICONINFORMATION);
+                    break;
+                case ID_BUTON_GONDER: {
+                    wchar_t inputBuf[1024];
+                    GetWindowTextW(hEditInput, inputBuf, 1024);
+                    
+                    if (wcslen(inputBuf) > 0) {
+                        // Kullanıcı girdisini ekrana yazdır
+                        int len = GetWindowTextLengthW(hEditOutput);
+                        SendMessageW(hEditOutput, EM_SETSEL, len, len);
+                        SendMessageW(hEditOutput, EM_REPLACESEL, FALSE, (LPARAM)L"Siz: ");
+                        SendMessageW(hEditOutput, EM_REPLACESEL, FALSE, (LPARAM)inputBuf);
+                        SendMessageW(hEditOutput, EM_REPLACESEL, FALSE, (LPARAM)L"\r\n\r\n[..] Groq Sunucusundan yanit bekleniyor...\r\n");
+
+                        // UTF-16'dan UTF-8'e dönüştür (API için)
+                        wstring ws(inputBuf);
+                        string strPrompt(ws.begin(), ws.end());
+                        
+                        // Yapay zekaya sor
+                        string aiResponse = AskGroq(strPrompt);
+                        wstring wsResponse(aiResponse.begin(), aiResponse.end());
+
+                        // Bekleniyor yazısını kaldır/üzerine yaz veya yeni satıra ekle
+                        len = GetWindowTextLengthW(hEditOutput);
+                        SendMessageW(hEditOutput, EM_SETSEL, len, len);
+                        SendMessageW(hEditOutput, EM_REPLACESEL, FALSE, (LPARAM)L"AI-IDA: ");
+                        SendMessageW(hEditOutput, EM_REPLACESEL, FALSE, (LPARAM)wsResponse.c_str());
+                        SendMessageW(hEditOutput, EM_REPLACESEL, FALSE, (LPARAM)L"\r\n\r\n--------------------------------------------------\r\n\r\n");
+
+                        // Input alanını temizle ve odağı orada tut
+                        SetWindowTextW(hEditInput, L"");
+                        SetFocus(hEditInput);
                     }
-                } while (Process32NextW(hSnap, &pe32));
+                    break;
+                }
             }
-            CloseHandle(hSnap);
+            break;
         }
-        return process_id;
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            break;
+        default:
+            return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
-
-    uintptr_t GetModuleBase(DWORD process_id, const wchar_t* module_name) {
-        uintptr_t base_addr = 0;
-        HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, process_id);
-        if (hSnap != INVALID_HANDLE_VALUE) {
-            MODULEENTRY32W me32;
-            me32.dwSize = sizeof(MODULEENTRY32W);
-            if (Module32FirstW(hSnap, &me32)) {
-                do {
-                    if (_wcsicmp(me32.szModule, module_name) == 0) {
-                        base_addr = (uintptr_t)me32.modBaseAddr;
-                        break;
-                    }
-                } while (Module32NextW(hSnap, &me32));
-            }
-            CloseHandle(hSnap);
-        }
-        return base_addr;
-    }
-
-    // 64-Bit Kesin Okuma Yapan Pointer Zincir Çözücü
-    uintptr_t ReadPointerChain(HANDLE hProc, uintptr_t base, const std::vector<unsigned int>& offsets) {
-        uintptr_t addr = base;
-        for (size_t i = 0; i < offsets.size(); ++i) {
-            uintptr_t next_addr = 0;
-            // 64-bit mimaride pointer'lar her zaman 8 byte (sizeof(uintptr_t)) olarak okunmalıdır
-            if (!ReadProcessMemory(hProc, (LPCVOID)addr, &next_addr, sizeof(uintptr_t), nullptr)) {
-                return 0; 
-            }
-            addr = next_addr + offsets[i];
-        }
-        return addr;
-    }
-}
-
-// --- [ HİLE PANELİ DURUM KONTROLÜ ] ---
-struct CheatStatus {
-    bool fov = false;
-    bool stamina = false;
-    bool speed = false;
-    bool ball_glow = false; 
-    bool fly_up = false; // Güvenli uçma/yükselme modu
-
-    float val_fov = 115.0f;
-    float val_speed = 3.0f; 
-    float val_glow = 9999.0f; 
-} status;
-
-void MenuCiz() {
-    system("cls");
-    std::cout << "==================================================\n";
-    std::cout << "     Ohiohook v5.5 - VIP Canli Yonetim Paneli     \n";
-    std::cout << "          64-Bit Stabilized Architecture          \n";
-    std::cout << "==================================================\n\n";
-
-    auto Bas = [](std::string isim, bool durum, std::string tus, std::string ek = "") {
-        std::cout << " [" << tus << "] " << isim << ": " 
-                  << (durum ? "[\x1B[32mON\x1B[0m]" : "[\x1B[31mOFF\x1B[0m]") 
-                  << " " << ek << "\n";
-    };
-
-    Bas("FOV Gorus Acisi      ", status.fov, "1", "(Deger: " + std::to_string((int)status.val_fov) + ")");
-    Bas("Sinirsiz Stamina    ", status.stamina, "2");
-    Bas("Speed Hack (Hiz)    ", status.speed, "3", "(Deger: " + std::to_string(status.val_speed).substr(0,3) + ")");
-    Bas("Topu Parlat (Glow)  ", status.ball_glow, "4");
-    Bas("Oto Yukari Ucma     ", status.fly_up, "5", "(Yorunge Modu)");
-    
-    std::cout << "\n [L] Kendini Yukselt (Anlik Işınlanma)\n";
-    std::cout << " [M] Ayarlari Canli Guncelle\n";
-    std::cout << "==================================================\n";
-    std::cout << "[*] Seçim yapmak için klavyedeki sayılara basın...\n";
-}
-
-void DegerleriAl() {
-    system("cls");
-    std::cout << "[=== HILE DEGER YAPILANDIRMASI ===]\n\n";
-    std::cout << "[>] FOV Degeri (Orn: 115): "; std::cin >> status.val_fov;
-    std::cout << "[>] SPEED Hiz Kat sayisi (Orn: 3.5): "; std::cin >> status.val_speed;
-    std::cout << "\n[+] Veriler esitlendi! Menuye donuluyor...";
-    Sleep(800);
-}
-
-int main() {
-    SetConsoleTitleW(L"Pro Soccer Online External Hook v5.5");
-    
-    std::cout << "[*] Oyun bekleniyor... Lutfen Pro Soccer Online'i baslatin.\n";
-    const wchar_t* oyunAdi = L"ProSoccerOnline-Win64-Shipping.exe";
-    
-    DWORD pID = 0;
-    while (pID == 0) {
-        pID = Memory::GetProcessId(oyunAdi);
-        Sleep(500);
-    }
-
-    // Belleğe tam yetkiyle bağlanmayı dene
-    Memory::process_handle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pID);
-    if (!Memory::process_handle) {
-        std::cout << "\n[-] Hafiza kapisi acilamadi!\n";
-        std::cout << "[!] SEBEP: Anti-cheat (EAC) aktif veya programı 'Yonetici Olarak' calistirmadiniz.\n";
-        system("pause");
-        return 0;
-    }
-
-    Memory::base_address = Memory::GetModuleBase(pID, oyunAdi);
-    if (Memory::base_address == 0) {
-        std::cout << "[-] Modul taban adresi alinamadi!\n";
-        CloseHandle(Memory::process_handle);
-        system("pause");
-        return 0;
-    }
-
-    DegerleriAl();
-    MenuCiz();
-
-    // Ana Döngü
-    while (true) {
-        bool girdiOldu = false;
-
-        if (GetAsyncKeyState('1') & 0x1) { status.fov = !status.fov; girdiOldu = true; }
-        if (GetAsyncKeyState('2') & 0x1) { status.stamina = !status.stamina; girdiOldu = true; }
-        if (GetAsyncKeyState('3') & 0x1) { status.speed = !status.speed; girdiOldu = true; }
-        if (GetAsyncKeyState('4') & 0x1) { status.ball_glow = !status.ball_glow; girdiOldu = true; }
-        if (GetAsyncKeyState('5') & 0x1) { status.fly_up = !status.fly_up; girdiOldu = true; }
-        
-        if (GetAsyncKeyState('M') & 0x1) { 
-            DegerleriAl(); 
-            girdiOldu = true; 
-        }
-
-        if (girdiOldu) {
-            MenuCiz();
-        }
-
-        // --- CANLI BELLEK YAZMA İŞLEMLERİ ---
-
-        // 1. FOV Hilesi
-        if (status.fov) {
-            uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::MainBase2, Offsets::FovChain);
-            if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &status.val_fov, sizeof(float), nullptr);
-        }
-
-        // 2. Sınırsız Stamina Hilesi
-        if (status.stamina) {
-            uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::MainBase1, Offsets::StaminaChain);
-            float fullStamina = 1.0f; 
-            if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &fullStamina, sizeof(float), nullptr);
-        }
-
-        // 3. Hız Hilesi
-        if (status.speed) {
-            uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::MainBase1, Offsets::SpeedChain);
-            if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &status.val_speed, sizeof(float), nullptr);
-        }
-
-        // 4. Top Parlatma Hilesi
-        if (status.ball_glow) {
-            uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::MainBase2, Offsets::BallGlowChain);
-            if (addr) WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &status.val_glow, sizeof(float), nullptr);
-        }
-
-        // 5. Sürekli Yukarı Doğru Uçma (Z eksenini sürekli arttırarak havada tutar)
-        if (status.fly_up) {
-            uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::PositionBase, Offsets::LocalPlayerZ);
-            if (addr) {
-                float currentPos = 0.0f;
-                ReadProcessMemory(Memory::process_handle, (LPCVOID)addr, &currentPos, sizeof(float), nullptr);
-                currentPos += 1.5f; 
-                WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &currentPos, sizeof(float), nullptr);
-            }
-        }
-
-        // Kısayol: L Tuşuna Basılı Tutulduğunda Kendini Yukarı Fırlatma
-        if (GetAsyncKeyState('L') & 0x8000) {
-            uintptr_t addr = Memory::ReadPointerChain(Memory::process_handle, Memory::base_address + Offsets::PositionBase, Offsets::LocalPlayerZ);
-            if (addr) {
-                float currentPos = 0.0f;
-                ReadProcessMemory(Memory::process_handle, (LPCVOID)addr, &currentPos, sizeof(float), nullptr);
-                currentPos += 8.0f; 
-                WriteProcessMemory(Memory::process_handle, (LPVOID)addr, &currentPos, sizeof(float), nullptr);
-                Sleep(20); 
-            }
-        }
-
-        Sleep(20); // CPU Stabilizasyonu
-    }
-
-    if (Memory::process_handle) CloseHandle(Memory::process_handle);
     return 0;
 }
+
+// Windows Program Giriş Noktası
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    curl_global_init(CURL_GLOBAL_ALL);
+
+    WNDCLASSW wc = {0};
+    wc.hbrBackground = (HBRUSH)COLOR_WINDOW;
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hInstance = hInstance;
+    wc.lpszClassName = L"AI_IDA_CLASS";
+    wc.lpfnWndProc = WndProc;
+
+    if(!RegisterClassW(&wc)) return -1;
+
+    // Pencere Boyutları ve Başlığı
+    CreateWindowW(L"AI_IDA_CLASS", L"AI-IDA Professional - Llama 3.3 Versatile Edition", 
+        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+        100, 100, 600, 430, NULL, NULL, hInstance, NULL);
+
+    MSG msg = {0};
+    while(GetMessageW(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+
+    curl_global_cleanup();
+    return 0;
+}
+
